@@ -1,0 +1,18 @@
+zstd/
+
+# JetBrains products
+.idea/
+.dependencies/
+.iml
+
+# VSCode
+.vscode/
+
+# Linters
+.mypy_cache/
+
+# pyenv
+.python-version
+
+# Mac meta
+.DS_Store

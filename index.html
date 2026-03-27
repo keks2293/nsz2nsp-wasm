@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>NSZ to NSP Converter (WebAssembly)</title>
+    <script src="nsz2nsp.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        input[type="file"] { margin: 10px 0; }
+        button { padding: 10px 20px; }
+        #status { margin-top: 20px; font-weight: bold; }
+        #download { margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>NSZ to NSP Converter (WebAssembly)</h1>
+    <p>Select a NSZ file to convert to NSP. Conversion happens entirely in your browser.</p>
+    <input type="file" id="fileInput" accept=".nsz">
+    <button id="convertBtn" disabled>Convert</button>
+    <div id="status"></div>
+    <div id="download"></div>
+
+    <script>
+        (function() {
+            const fileInput = document.getElementById('fileInput');
+            const convertBtn = document.getElementById('convertBtn');
+            const statusDiv = document.getElementById('status');
+            const downloadDiv = document.getElementById('download');
+
+            let fileBuffer = null;
+            let fileName = '';
+
+            // Ожидание появления экспортированных функций и HEAPU8
+            function waitForModule() {
+                return new Promise((resolve) => {
+                    const check = () => {
+                        if (Module &&
+                            typeof Module._malloc === 'function' &&
+                            typeof Module._free === 'function' &&
+                            typeof Module._nsz_get_output_size === 'function' &&
+                            typeof Module._nsz_convert === 'function' &&
+                            Module.HEAPU8) {  // проверяем наличие HEAPU8
+                            resolve();
+                            return;
+                        }
+                        setTimeout(check, 50);
+                    };
+                    check();
+                });
+            }
+
+            fileInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        fileBuffer = event.target.result;
+                        fileName = file.name;
+                        convertBtn.disabled = false;
+                        statusDiv.textContent = `Loaded: ${fileName} (${fileBuffer.byteLength} bytes)`;
+                    };
+                    reader.readAsArrayBuffer(file);
+                } else {
+                    fileBuffer = null;
+                    convertBtn.disabled = true;
+                    statusDiv.textContent = '';
+                    downloadDiv.innerHTML = '';
+                }
+            });
+
+            convertBtn.addEventListener('click', async () => {
+                if (!fileBuffer) return;
+
+                statusDiv.textContent = 'Initializing WASM module...';
+                convertBtn.disabled = true;
+                downloadDiv.innerHTML = '';
+
+                try {
+                    // Ждём полной готовности модуля (включая HEAPU8)
+                    await waitForModule();
+
+                    statusDiv.textContent = 'Converting...';
+
+                    const input = new Uint8Array(fileBuffer);
+                    const inputPtr = Module._malloc(input.length);
+                    Module.HEAPU8.set(input, inputPtr);
+
+                    const outSize = Module._nsz_get_output_size(inputPtr, input.length);
+                    if (outSize === 0) {
+                        throw new Error('Invalid NSZ file or unsupported format');
+                    }
+
+                    const outPtr = Module._malloc(outSize);
+                    const resultSize = Module._nsz_convert(inputPtr, input.length, outPtr, outSize);
+                    if (resultSize !== outSize) {
+                        throw new Error('Conversion failed');
+                    }
+
+                    const output = new Uint8Array(resultSize);
+                    output.set(Module.HEAPU8.subarray(outPtr, outPtr + resultSize));
+
+                    Module._free(inputPtr);
+                    Module._free(outPtr);
+
+                    const blob = new Blob([output], { type: 'application/octet-stream' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = fileName.replace(/\.nsz$/i, '.nsp') || 'converted.nsp';
+                    a.textContent = 'Download NSP';
+                    downloadDiv.appendChild(a);
+                    statusDiv.textContent = 'Success!';
+                } catch (err) {
+                    statusDiv.textContent = 'Error: ' + err.message;
+                    console.error(err);
+                } finally {
+                    convertBtn.disabled = false;
+                }
+            });
+        })();
+    </script>
+</body>
+</html>
